@@ -130,14 +130,7 @@ func main() {
 		*lg,
 		chM}
 
-	cli := Client{
-		conf,
-		lc,
-		mon,
-		*graphiteAdrrTCP,
-		*lg,
-		ch,
-		chM}
+	cli := NewClient(conf, lc, mon, *graphiteAdrrTCP, *lg, ch, chM)
 
 	srv := Server{
 		conf,

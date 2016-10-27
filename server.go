@@ -140,10 +140,9 @@ func (s Server)handleRequest(conn net.Conn) {
 		s.mon.got.net++
 		metric, err := connbuf.ReadString('\n')
 		// Even if error occurred we still put "metric" into analysis, cause it can be a valid metric, but without \n
-		s.cleanAndUseIncomingData([]string{strings.Replace(strings.Replace(metric, "\r", "", -1), "\n", "", -1)})
+		s.cleanAndUseIncomingData([]string{strings.TrimRight(metric, "\r\n")})
 
 		if err!= nil {
-			conn.Close()
 			break
 		}
 	}
