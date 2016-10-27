@@ -8,6 +8,8 @@ import (
 	"strings"
 )
 
+const METRIBUFFERSIZE = 20
+
 type Client struct {
 	conf         Config
 	lc           LocalConfig
@@ -16,12 +18,12 @@ type Client struct {
 	lg           log.Logger
 	ch           chan string
 	chM          chan string
-	metricsBuffer [10]string
+	metricsBuffer [METRIBUFFERSIZE]string
 	metricsBufferLength int
 }
 
 func NewClient(conf Config, lc LocalConfig, mon *Monitoring, graphiteAddr net.TCPAddr, lg log.Logger, ch chan string, chM chan string) *Client {
-	return &Client{conf, lc, mon, graphiteAddr, lg, ch, chM, [10]string{}, 0}
+	return &Client{conf, lc, mon, graphiteAddr, lg, ch, chM, [METRIBUFFERSIZE]string{}, 0}
 }
 
 /*
@@ -66,7 +68,6 @@ func (c *Client) saveChannelToRetry(ch chan string, size int) {
 	So we need to keep newest metrics
 */
 func (c *Client) removeOldDataFromRetryFile() {
-
 	currentLinesInFile := getSizeInLinesFromFile(c.conf.RetryFile)
 	if currentLinesInFile > c.lc.fileMetricSize {
 		c.lg.Printf("I can not save to %s more, than %d. I will have to drop the rest (%d)",
@@ -103,7 +104,7 @@ func (c *Client) tryToSendToGraphite(metric string, conn net.Conn) error {
 	c.metricsBuffer[c.metricsBufferLength] = metric
 	c.metricsBufferLength++
 
-	if c.metricsBufferLength >= len(c.metricsBuffer) {
+	if c.metricsBufferLength >= METRIBUFFERSIZE {
 		metricsBufferLengthCached := c.metricsBufferLength
 		err := c.metricsBufferSendToGraphite(conn)
 
