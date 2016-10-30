@@ -5,6 +5,7 @@ import (
 	"os"
 	"sync"
 	"github.com/BurntSushi/toml"
+	"gopkg.in/natefinch/lumberjack.v2"
 	"fmt"
 	"net"
 	"syscall"
@@ -49,11 +50,14 @@ func main() {
 	if _, err := toml.DecodeFile(configFile, &conf); err != nil {
 		fmt.Println("Failed to parse config file", err.Error())
 	}
-	f, err := os.OpenFile(conf.Log, os.O_RDWR | os.O_CREATE | os.O_APPEND, 0660)
-	if err != nil {
-		log.Println("Can not open file "+ conf.Log, err.Error())
-		os.Exit(1)
+
+	f := &lumberjack.Logger{
+		Filename:   conf.Log,
+		MaxSize:    50, // megabytes
+		MaxBackups: 7,
+		MaxAge:     10, //days
 	}
+
 	lg := log.New(f, "", log.Ldate|log.Lmicroseconds|log.Lshortfile)
 
 	monitorMetrics := monitorMetrics
