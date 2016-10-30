@@ -45,22 +45,3 @@ func readMetricsFromFile(file string) []string {
 
 	return results_list
 }
-
-// Reading metrics from file and remove file afterwords
-func getSizeInLinesFromFile(file string) int {
-	res := 0
-
-	f, err := os.Open(file)
-	if err != nil {
-		return res
-	}
-
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		res++
-	}
-
-	return res
-}
