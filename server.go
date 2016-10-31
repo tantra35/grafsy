@@ -23,7 +23,7 @@ type Server struct {
 }
 
 
-func (s Server) combineMetricsWithSameName(metric string, metrics []Metric) []Metric {
+func (s *Server) combineMetricsWithSameName(metric string, metrics []Metric) []Metric {
 	split := regexp.MustCompile("\\s").Split(metric, 3)
 
 	value, err := strconv.ParseFloat(split[1], 64)
@@ -48,7 +48,7 @@ func (s Server) combineMetricsWithSameName(metric string, metrics []Metric) []Me
 }
 
 // Sum metrics with prefix
-func (s Server) sumMetricsWithPrefix() {
+func (s *Server) sumMetricsWithPrefix() {
 	for ;; time.Sleep(time.Duration(s.conf.SumInterval)*time.Second) {
 		var working_list[] Metric
 		chanSize := len(s.chS)
@@ -72,7 +72,7 @@ func (s Server) sumMetricsWithPrefix() {
 }
 
 // AVG metrics with prefix
-func (s Server) avgMetricsWithPrefix() {
+func (s *Server) avgMetricsWithPrefix() {
 	for ;; time.Sleep(time.Duration(s.conf.AvgInterval)*time.Second) {
 		var working_list[] Metric
 		chanSize := len(s.chA)
@@ -101,7 +101,7 @@ func (s Server) avgMetricsWithPrefix() {
 	Check overflow of the channel
 	Put metric in a proper channel
  */
-func (s Server)cleanAndUseIncomingData(metrics []string) {
+func (s *Server)cleanAndUseIncomingData(metrics []string) {
 	for _,metric := range metrics {
 		if validateMetric(metric, s.conf.AllowedMetrics) {
 			if strings.HasPrefix(metric, s.conf.SumPrefix) {
@@ -133,7 +133,7 @@ func (s Server)cleanAndUseIncomingData(metrics []string) {
 }
 
 // Reading metrics from network
-func (s Server)handleRequest(conn net.Conn) {
+func (s *Server)handleRequest(conn net.Conn) {
 	connbuf := bufio.NewReader(conn)
 	defer conn.Close()
 	for ;; {
@@ -149,7 +149,7 @@ func (s Server)handleRequest(conn net.Conn) {
 }
 
 // Reading metrics from files in folder. This is a second way how to send metrics, except network
-func (s Server)handleDirMetrics() {
+func (s *Server)handleDirMetrics() {
 	for ;; time.Sleep(time.Duration(s.conf.ClientSendInterval)*time.Second) {
 		files, err := ioutil.ReadDir(s.conf.MetricDir)
 		if err != nil {
@@ -164,7 +164,7 @@ func (s Server)handleDirMetrics() {
 	}
 }
 
-func (s Server)runServer() {
+func (s *Server)runServer() {
 	// Listen for incoming connections.
 	l, err := net.Listen("tcp", s.conf.LocalBind)
 	if err != nil {
