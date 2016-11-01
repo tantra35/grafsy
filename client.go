@@ -16,7 +16,7 @@ type Client struct {
 	lc           LocalConfig
 	mon          *Monitoring
 	graphiteAddr net.TCPAddr
-	lg           log.Logger
+	lg           *log.Logger
 	ch           chan string
 	chM          chan string
 	goque        *goque.Queue
@@ -25,7 +25,7 @@ type Client struct {
 	metricsBufferLength int
 }
 
-func NewClient(conf Config, lc LocalConfig, mon *Monitoring, graphiteAddr net.TCPAddr, lg log.Logger, ch chan string, chM chan string) *Client {
+func NewClient(conf Config, lc LocalConfig, mon *Monitoring, graphiteAddr net.TCPAddr, lg *log.Logger, ch chan string, chM chan string) *Client {
 	q, err := goque.OpenQueue(conf.RetryFile)
 	if err != nil {
 		lg.Println("Can't create retry queue:", err.Error())
@@ -45,7 +45,7 @@ func (c *Client) saveSliceToRetry(metrics []string) {
 	for _, metric := range metrics {
 		c.goque.EnqueueString(metric)
 		if len(c.goquech) == 0 { c.goquech <- c.goque }
-		c.mon.saved++
+		c.mon.countSaved()
 	}
 }
 
@@ -53,7 +53,7 @@ func (c *Client) saveChannelToRetry(ch chan string, size int) {
 	for i := 0; i < size; i++ {
 		c.goque.EnqueueString(<-ch)
 		if len(c.goquech) == 0 { c.goquech <- c.goque }
-		c.mon.saved++
+		c.mon.countSaved()
 	}
 }
 
@@ -265,6 +265,7 @@ func (c *Client) sendRetry() {
 				conn = nil
 			}
 
+			c.mon.countGotRetry(int(metricsBufferLength))
 			sendAttempts = 0
 			sendAttemptCountdown = 0
 			metricsBufferLength = 0

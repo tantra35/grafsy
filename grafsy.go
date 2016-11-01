@@ -3,12 +3,10 @@ package main
 import (
 	"log"
 	"os"
-	"sync"
 	"github.com/BurntSushi/toml"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"fmt"
 	"net"
-	"syscall"
 	"path/filepath"
 	"flag"
 )
@@ -49,6 +47,14 @@ func main() {
 	var conf Config
 	if _, err := toml.DecodeFile(configFile, &conf); err != nil {
 		fmt.Println("Failed to parse config file", err.Error())
+		os.Exit(1)
+	}
+
+	if _, err := os.Stat(filepath.Dir(conf.Log)); os.IsNotExist(err) {
+		if os.MkdirAll(filepath.Dir(conf.Log), os.ModePerm) != nil {
+			fmt.Println("Can not create logfile's dir " + filepath.Dir(conf.Log))
+			os.Exit(1)
+		}
 	}
 
 	f := &lumberjack.Logger{
@@ -59,13 +65,6 @@ func main() {
 	}
 
 	lg := log.New(f, "", log.Ldate|log.Lmicroseconds|log.Lshortfile)
-
-	monitorMetrics := monitorMetrics
-
-	if conf.MonitoringPath == "" {
-		lg.Println("Monitoring is disabled")
-		monitorMetrics = 0
-	}
 
 	/*
 		Units - metric
@@ -94,13 +93,6 @@ func main() {
 		 */
 		conf.MetricsPerSecond*conf.ClientSendInterval*10}
 
-
-	if _, err := os.Stat(filepath.Dir(conf.Log)); os.IsNotExist(err) {
-		if os.MkdirAll(filepath.Dir(conf.Log), os.ModePerm) != nil {
-			log.Println("Can not create logfile's dir " + filepath.Dir(conf.Log))
-		}
-	}
-
 	graphiteAdrrTCP, err := net.ResolveTCPAddr("tcp", conf.GraphiteAddr)
 	if err != nil {
 		lg.Println("This is not a valid address:", err.Error())
@@ -112,46 +104,21 @@ func main() {
 		This is especially important when your metricDir is in /tmp
 	 */
 	if _, err := os.Stat(conf.MetricDir); os.IsNotExist(err) {
-		oldUmask := syscall.Umask(0)
 		os.MkdirAll(conf.MetricDir, 0777|os.ModeSticky)
-		syscall.Umask(oldUmask)
 	} else {
 		os.Chmod(conf.MetricDir, 0777|os.ModeSticky)
 	}
 
 	/* Buffers */
 	var ch chan string = make(chan string, lc.mainBufferSize + monitorMetrics)
-	var chS chan string = make(chan string, lc.sumBufSize)
-	var chA chan string = make(chan string, lc.avgBufSize)
 	var chM chan string = make(chan string, monitorMetrics)
 
-	mon := &Monitoring{
-		conf, Source{},
-		0,
-		0,
-		0,
-		0,
-		*lg,
-		chM}
+	mon := NewMonitoring(conf, lg, chM)
+	cli := NewClient(conf, lc, mon, *graphiteAdrrTCP, lg, ch, chM)
+	srv := NewServer(conf, lc, mon, lg, ch)
 
-	cli := NewClient(conf, lc, mon, *graphiteAdrrTCP, *lg, ch, chM)
-
-	srv := Server{
-		conf,
-		lc,
-		mon,
-		*lg,
-		ch,
-		chS,
-		chA}
-
-	var wg sync.WaitGroup
 	go srv.runServer()
 	go cli.runClient()
-	if monitorMetrics != 0 {
-		go mon.runMonitoring()
-	}
 
-	wg.Add(1)
-	wg.Wait()
+	mon.runMonitoring()
 }

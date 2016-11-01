@@ -16,12 +16,19 @@ type Server struct {
 	conf Config
 	lc LocalConfig
 	mon *Monitoring
-	lg log.Logger
+	lg *log.Logger
 	ch chan string
 	chS chan string
 	chA chan string
+	allowMetricsRegexp *regexp.Regexp
 }
 
+func NewServer(conf Config, lc LocalConfig, mon *Monitoring, lg *log.Logger, ch chan string) *Server {
+	chS := make(chan string, lc.sumBufSize)
+	chA := make(chan string, lc.avgBufSize)
+
+	return &Server{conf, lc, mon, lg, ch, chS, chA, regexp.MustCompile(conf.AllowedMetrics)}
+}
 
 func (s *Server) combineMetricsWithSameName(metric string, metrics []Metric) []Metric {
 	split := regexp.MustCompile("\\s").Split(metric, 3)
@@ -65,7 +72,7 @@ func (s *Server) sumMetricsWithPrefix() {
 				case s.ch <- val.name + " " + strconv.FormatFloat(val.value, 'f', 2, 32) + " " + strconv.FormatInt(val.timestamp/val.amount, 10):
 				default:
 					s.lg.Printf("Too many metrics in the main queue (%d). I can not append sum metrics", len(s.ch))
-					s.mon.dropped++
+					s.mon.countDroped()
 			}
 		}
 	}
@@ -89,7 +96,7 @@ func (s *Server) avgMetricsWithPrefix() {
 				case s.ch <- val.name + " " + strconv.FormatFloat(val.value/float64(val.amount), 'f', 2, 32) + " " + strconv.FormatInt(val.timestamp/val.amount, 10):
 				default:
 					s.lg.Printf("Too many metrics in the main queue (%d). I can not append avg metrics", len(s.ch))
-					s.mon.dropped++
+					s.mon.countDroped()
 			}
 		}
 	}
@@ -103,29 +110,29 @@ func (s *Server) avgMetricsWithPrefix() {
  */
 func (s *Server)cleanAndUseIncomingData(metrics []string) {
 	for _,metric := range metrics {
-		if validateMetric(metric, s.conf.AllowedMetrics) {
+		if validateMetric(metric, s.allowMetricsRegexp) {
 			if strings.HasPrefix(metric, s.conf.SumPrefix) {
 				select {
 					case s.chS <- metric:
 					default:
-						s.mon.dropped++
+						s.mon.countDroped()
 				}
 			} else if strings.HasPrefix(metric, s.conf.AvgPrefix) {
 				select {
 					case s.chA <- metric:
 					default:
-						s.mon.dropped++
+						s.mon.countDroped()
 				}
 			} else {
 				select {
 					case s.ch <- metric:
 					default:
-						s.mon.dropped++
+						s.mon.countDroped()
 				}
 			}
 		} else {
 			if metric != "" {
-				s.mon.invalid++
+				s.mon.countInvalid()
 				s.lg.Printf("Removing bad metric '%s' from the list", metric)
 			}
 		}
@@ -137,7 +144,7 @@ func (s *Server)handleRequest(conn net.Conn) {
 	connbuf := bufio.NewReader(conn)
 	defer conn.Close()
 	for ;; {
-		s.mon.got.net++
+		s.mon.countGotNet()
 		metric, err := connbuf.ReadString('\n')
 		// Even if error occurred we still put "metric" into analysis, cause it can be a valid metric, but without \n
 		s.cleanAndUseIncomingData([]string{strings.TrimRight(metric, "\r\n")})
@@ -157,7 +164,7 @@ func (s *Server)handleDirMetrics() {
 		}
 		for _, f := range files {
 			results_list := readMetricsFromFile(s.conf.MetricDir+"/"+f.Name())
-			s.mon.got.dir += len(results_list)
+			s.mon.countGotDir(len(results_list))
 			s.cleanAndUseIncomingData(results_list)
 		}
 
