@@ -6,7 +6,6 @@ import (
 	"github.com/BurntSushi/toml"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"fmt"
-	"net"
 	"path/filepath"
 	"flag"
 )
@@ -93,12 +92,6 @@ func main() {
 		 */
 		conf.MetricsPerSecond*conf.ClientSendInterval*10}
 
-	graphiteAdrrTCP, err := net.ResolveTCPAddr("tcp", conf.GraphiteAddr)
-	if err != nil {
-		lg.Println("This is not a valid address:", err.Error())
-		os.Exit(1)
-	}
-
 	/*
 		Check if directories for temporary files exist
 		This is especially important when your metricDir is in /tmp
@@ -114,7 +107,7 @@ func main() {
 	var chM chan string = make(chan string, monitorMetrics)
 
 	mon := NewMonitoring(conf, lg, chM)
-	cli := NewClient(conf, lc, mon, *graphiteAdrrTCP, lg, ch, chM)
+	cli := NewClient(conf, lc, mon, lg, ch, chM)
 	srv := NewServer(conf, lc, mon, lg, ch)
 
 	go srv.runServer()

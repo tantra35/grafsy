@@ -15,7 +15,6 @@ type Client struct {
 	conf         Config
 	lc           LocalConfig
 	mon          *Monitoring
-	graphiteAddr net.TCPAddr
 	lg           *log.Logger
 	ch           chan string
 	chM          chan string
@@ -25,7 +24,7 @@ type Client struct {
 	metricsBufferLength int
 }
 
-func NewClient(conf Config, lc LocalConfig, mon *Monitoring, graphiteAddr net.TCPAddr, lg *log.Logger, ch chan string, chM chan string) *Client {
+func NewClient(conf Config, lc LocalConfig, mon *Monitoring, lg *log.Logger, ch chan string, chM chan string) *Client {
 	q, err := goque.OpenQueue(conf.RetryFile)
 	if err != nil {
 		lg.Println("Can't create retry queue:", err.Error())
@@ -34,7 +33,7 @@ func NewClient(conf Config, lc LocalConfig, mon *Monitoring, graphiteAddr net.TC
 
 	qch := make(chan *goque.Queue, 1)
 
-	return &Client{conf, lc, mon, graphiteAddr, lg, ch, chM, q, qch, [METRIBUFFERSIZE]string{}, 0}
+	return &Client{conf, lc, mon, lg, ch, chM, q, qch, [METRIBUFFERSIZE]string{}, 0}
 }
 
 /*
@@ -90,7 +89,7 @@ func (c *Client) tryToSendToGraphite(metric string, conn net.Conn) error {
 
 func (c *Client) establishConnectionToGraphite() (net.Conn, error) {
 	// Try to dial to Graphite server. If ClientSendInterval is 10 seconds - dial should be no longer than 1 second
-	conn, err := net.DialTimeout("tcp", c.graphiteAddr.String(), time.Duration(c.conf.ConnectTimeout)*time.Second)
+	conn, err := net.DialTimeout("tcp", c.conf.GraphiteAddr, time.Duration(c.conf.ConnectTimeout)*time.Second)
 	if err != nil {
 		c.lg.Println("Can not connect to graphite server: ", err.Error())
 		return nil, err
