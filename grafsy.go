@@ -90,7 +90,7 @@ func main() {
 		/*
 			Retry file will take only 10 full buffers
 		 */
-		conf.MetricsPerSecond*conf.ClientSendInterval*10}
+		conf.MetricsPerSecond*conf.ClientSendInterval*100}
 
 	/*
 		Check if directories for temporary files exist

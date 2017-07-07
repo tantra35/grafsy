@@ -50,9 +50,15 @@ func (c *Client) saveSliceToRetry(metrics []string) {
 
 func (c *Client) saveChannelToRetry(ch chan string, size int) {
 	for i := 0; i < size; i++ {
-		c.goque.EnqueueString(<-ch)
-		if len(c.goquech) == 0 { c.goquech <- c.goque }
-		c.mon.countSaved()
+		metric := <-ch
+
+		if c.goque.Length() < uint64(c.lc.fileMetricSize) {
+			c.goque.EnqueueString(metric)
+			if len(c.goquech) == 0 { c.goquech <- c.goque }
+			c.mon.countSaved()
+		} else {
+			c.mon.countDroped()
+		}
 	}
 }
 
@@ -112,7 +118,7 @@ func (c *Client) establishConnectionToGraphite() (net.Conn, error) {
 	2) Metrics from main quere
 	3) Retry file
 */
-func (c *Client) runClientOneStep()  {
+func (c *Client) runClientOneStep() {
 	conn, err := c.establishConnectionToGraphite()
 	if err != nil {
 		c.saveChannelToRetry(c.chM, len(c.chM))
@@ -187,22 +193,6 @@ func (c *Client) sendRetry() {
 	for ;; {
 		qlength := q.Length()
 		c.lg.Println("Retry mertics queue length: ", qlength, ", metricsBufferLength: ", metricsBufferLength)
-
-		//Очищаем очередь от лишнего
-		if qlength + metricsBufferLength > uint64(c.lc.fileMetricSize) {
-			removedElmsCount := qlength  + metricsBufferLength - uint64(c.lc.fileMetricSize)
-
-			if removedElmsCount > metricsBufferLength {
-				metricsBufferLength = 0
-				removedElmsCount -= metricsBufferLength
-
-				for i := removedElmsCount; i > 0; i-- {
-					q.Dequeue()
-				}
-			} else {
-				metricsBufferLength -= removedElmsCount
-			}
-		}
 
 		if metricsBufferLength == 0 {
 			metricbufferfillloop:
@@ -280,6 +270,12 @@ func (c *Client) sendRetry() {
 
 func (c *Client) runClient() {
 	sup := Supervisor{c.conf.Supervisor}
+
+	//If in quue exitst eny items try to sedn them 
+	if c.goque.Length() > 0 {
+		c.goquech <- c.goque
+	}
+
 	go c.sendRetry()
 
 	for ; ; time.Sleep(time.Duration(c.conf.ClientSendInterval) * time.Second) {
