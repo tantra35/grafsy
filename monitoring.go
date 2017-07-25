@@ -40,6 +40,7 @@ const (
 	GOTRETRY = 4
 	GOTNET = 5
 	GOTDIR = 6
+	TIMEOUT = 100
 )
 
 func NewMonitoring(conf Config, lg *log.Logger, chM chan string) *Monitoring {
@@ -107,33 +108,38 @@ func (m *Monitoring) clean(){
 }
 
 func (m *Monitoring) runMonitoring() {
+	go func(ch chan pair){
+		for ; ; time.Sleep(time.Duration(m.conf.MetricsCollectInterval) * time.Second) {
+			ch <- pair{TIMEOUT, 0}
+		}
+	} (m.ch)
+
 	for {
-		select {
-			case item := <- m.ch:
-				switch item.a {
-					case DROP:
-						m.dropped += item.b
+		item := <- m.ch
 
-					case SENT:
-						m.sent += item.b
+		switch item.a {
+			case DROP:
+				m.dropped += item.b
 
-					case SAVED:
-						m.saved += item.b
+			case SENT:
+				m.sent += item.b
 
-					case INVALID:
-						m.invalid += item.b
+			case SAVED:
+				m.saved += item.b
 
-					case GOTRETRY:
-						m.got.retry += item.b
+			case INVALID:
+				m.invalid += item.b
 
-					case GOTNET:
-						m.got.net += item.b
+			case GOTRETRY:
+				m.got.retry += item.b
 
-					case GOTDIR:
-						m.got.dir += item.b
-				}
+			case GOTNET:
+				m.got.net += item.b
 
-			case <- time.After(time.Duration(m.conf.MetricsCollectInterval) * time.Second):
+			case GOTDIR:
+				m.got.dir += item.b
+
+			case TIMEOUT:
 				if m.conf.MonitoringPath != "" {
 					for _, metric := range m.generateOwnMonitoring() {
 						select {
