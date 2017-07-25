@@ -13,6 +13,7 @@ import (
 type Config struct {
 	Supervisor string
 	ClientSendInterval int
+	MetricsCollectInterval int
 	MetricsPerSecond int
 	GraphiteAddr string // Think about multiple servers
 	ConnectTimeout int

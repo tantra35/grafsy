@@ -133,7 +133,7 @@ func (s *Server)cleanAndUseIncomingData(metrics []string) {
 		} else {
 			if metric != "" {
 				s.mon.countInvalid()
-				s.lg.Printf("Removing bad metric '%s' from the list", metric)
+				s.lg.Printf("Removing invalid metric '%s' from the list", metric)
 			}
 		}
 	}

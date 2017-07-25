@@ -40,14 +40,6 @@ func NewClient(conf Config, lc LocalConfig, mon *Monitoring, lg *log.Logger, ch 
  Function saves []string to file. We need it cause it make a lot of IO to save and check size of file
  After every single metric
 */
-func (c *Client) saveSliceToRetry(metrics []string) {
-	for _, metric := range metrics {
-		c.goque.EnqueueString(metric)
-		if len(c.goquech) == 0 { c.goquech <- c.goque }
-		c.mon.countSaved()
-	}
-}
-
 func (c *Client) saveChannelToRetry(ch chan string, size int) {
 	for i := 0; i < size; i++ {
 		metric := <-ch
@@ -66,7 +58,13 @@ func (c *Client) metricsBufferSendToGraphite(conn net.Conn) error {
 	_, err := conn.Write([]byte(strings.Join(c.metricsBuffer[: c.metricsBufferLength], "\n") + "\n"))
 
 	if err != nil {
-		c.saveSliceToRetry(c.metricsBuffer[: c.metricsBufferLength])
+		metrics := c.metricsBuffer[: c.metricsBufferLength]
+
+		for _, metric := range metrics {
+			c.goque.EnqueueString(metric)
+			if len(c.goquech) == 0 { c.goquech <- c.goque }
+			c.mon.countSaved()
+		}
 	}
 
 	c.metricsBufferLength = 0
@@ -87,7 +85,7 @@ func (c *Client) tryToSendToGraphite(metric string, conn net.Conn) error {
 			return err
 		}
 
-		c.mon.sent += metricsBufferLengthCached
+		c.mon.countSentNum(metricsBufferLengthCached)
 	}
 
 	return nil
@@ -112,6 +110,21 @@ func (c *Client) establishConnectionToGraphite() (net.Conn, error) {
 	return conn, nil
 }
 
+func (c *Client) runClientOneStepSendToGraphite(conn net.Conn, ch chan string, chCount int) (bool) {
+	connectionFailed := false
+
+	for i := 0; i < chCount; i++ {
+		err := c.tryToSendToGraphite(<-ch, conn)
+		if err != nil {
+			c.saveChannelToRetry(ch, chCount - i)
+			connectionFailed = true
+			break
+		}
+	}
+
+	return connectionFailed
+}
+
 /*
 	Sending data to graphite:
 	1) Metrics from monitor queue
@@ -119,58 +132,29 @@ func (c *Client) establishConnectionToGraphite() (net.Conn, error) {
 	3) Retry file
 */
 func (c *Client) runClientOneStep() {
+	l_chMCount := len(c.chM)
+	l_chCount := len(c.ch)
+
 	conn, err := c.establishConnectionToGraphite()
 	if err != nil {
-		c.saveChannelToRetry(c.chM, len(c.chM))
-		c.saveChannelToRetry(c.ch, len(c.ch))
+		c.saveChannelToRetry(c.chM, l_chMCount)
+		c.saveChannelToRetry(c.ch, l_chCount)
 		return
 	}
 
 	defer conn.Close()
 	connectionFailed := false
-	processedTotal := 0
 
 	// Monitoring. We read it always and we reserved space for it
-	bufSize := len(c.chM)
-
-	for i := 0; i < bufSize; i++ {
-		err = c.tryToSendToGraphite(<-c.chM, conn)
-		if err != nil {
-			c.saveChannelToRetry(c.chM, bufSize-i)
-			connectionFailed = true
-			break
-		}
-	}
+	connectionFailed = c.runClientOneStepSendToGraphite(conn, c.chM, l_chMCount)
 
 	if connectionFailed {
-		c.saveChannelToRetry(c.ch, len(c.ch))
+		c.saveChannelToRetry(c.ch, l_chCount)
 		return
 	}
 
-	/*
-	 Main Buffer. We read it completely but send only part which fits in mainBufferSize
-	 Rests we save
-	*/
-	bufSize = len(c.ch)
-	for processedMainBuff := 0; processedMainBuff < bufSize; processedMainBuff++ {
-		if processedTotal >= c.lc.mainBufferSize {
-			/*
-			 Save only data for the moment of run. Concurrent goroutines know no mercy
-			 and they continue to write...
-			*/
-			c.saveChannelToRetry(c.ch, bufSize - processedMainBuff)
-			break
-		}
-
-		err = c.tryToSendToGraphite(<-c.ch, conn)
-		if err != nil {
-			c.saveChannelToRetry(c.ch, bufSize-processedMainBuff)
-			connectionFailed = true
-			break
-		}
-
-		processedTotal++
-	}
+	// Metrics
+	connectionFailed = c.runClientOneStepSendToGraphite(conn, c.ch, l_chCount)
 
 	if !connectionFailed {
 		//Flush rest
@@ -182,7 +166,7 @@ func (c *Client) runClientOneStep() {
 
 func (c *Client) sendRetry() {
 	metricsBuffer := [METRIBUFFERSIZE]string{}
-	metricsBufferLength := uint64(0)
+	metricsBufferLength := int(0)
 	q := <- c.goquech
 	sendAttempts := uint(0)
 
@@ -254,7 +238,7 @@ func (c *Client) sendRetry() {
 				conn = nil
 			}
 
-			c.mon.countGotRetry(int(metricsBufferLength))
+			c.mon.countGotRetry(metricsBufferLength)
 			sendAttempts = 0
 			sendAttemptCountdown = 0
 			metricsBufferLength = 0
