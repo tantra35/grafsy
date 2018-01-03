@@ -112,8 +112,6 @@ func (c *Client) establishConnectionToGraphite() (net.Conn, error) {
 }
 
 func (c *Client) runClientOneStepSendToGraphite(conn net.Conn, ch chan string, chCount int) (bool) {
-	conn.SetWriteDeadline(time.Now().Add(time.Duration(c.conf.ClientSendInterval)*time.Second))
-
 	for i := 0; i < chCount; i++ {
 		err := c.tryToSendToGraphite(<-ch, conn)
 		if err != nil {
@@ -142,6 +140,8 @@ func (c *Client) runClientOneStep(conn net.Conn) (bool) {
 		return false
 	}
 
+	conn.SetWriteDeadline(time.Now().Add(time.Duration(c.conf.ClientSendInterval) * time.Second))
+
 	// Monitoring. We read it always and we reserved space for it
 	sendOK := c.runClientOneStepSendToGraphite(conn, c.chM, l_chMCount)
 
@@ -154,8 +154,6 @@ func (c *Client) runClientOneStep(conn net.Conn) (bool) {
 	sendOK = c.runClientOneStepSendToGraphite(conn, c.ch, l_chCount)
 
 	if sendOK {
-		conn.SetWriteDeadline(time.Now().Add(time.Duration(c.conf.ClientSendInterval) * time.Second))
-
 		//Flush rest
 		if c.metricsBufferLength > 0 {
 			err := c.metricsBufferSendToGraphite(conn)
@@ -186,69 +184,69 @@ func (c *Client) sendRetry() {
 			continue
 		}
 
-		if metricsBufferLength == 0 {
-			for ; metricsBufferLength < METRIBUFFERSIZE; {
-				item, err := q.Dequeue()
-				if err != nil {
-					if metricsBufferLength == 0 {
-						select {
-							case <- c.goquech:
-								continue
-
-							case <- time.After(time.Duration(c.conf.ClientSendInterval) * time.Second):
-								if conn != nil {
-									if metricsBufferLength == 0 {
-										c.lg.Println("Close graphite server connection in retry due unuse")
-										conn.Close()
-										conn = nil
-									}
-								}
-						}
-					} else {
-						break
-					}
-				}
-
-				metricsBuffer[metricsBufferLength] = item.ToString()
-				metricsBufferLength++
-			}
-
-			qlength := q.Length()
-			c.lg.Println("Retry mertics queue length: ", qlength, ", metricsBufferLength: ", metricsBufferLength)
-		} else {
-			if conn == nil {
-				conn, err = c.establishConnectionToGraphite()
-				if err != nil {
-					sendAttemptCountdown++
-					continue
-				}
-
-				c.lg.Println("Establish new connection to carbon server in retry loop")
-			}
-
-			_, err := conn.Write([]byte(strings.Join(metricsBuffer[: metricsBufferLength], "\n") + "\n"))
+		for ; metricsBufferLength < METRIBUFFERSIZE; {
+			item, err := q.Dequeue()
 			if err != nil {
-				conn.Close()
-				conn = nil
+				if metricsBufferLength == 0 {
+					select {
+						case <- c.goquech:
+							continue
 
-				c.lg.Println("Can't send metrics in retry: ", err.Error())
+						case <- time.After(time.Duration(c.conf.ClientSendInterval) * time.Second):
+							if conn != nil {
+								if metricsBufferLength == 0 {
+									c.lg.Println("Close graphite server connection in retry due unuse")
+									conn.Close()
+									conn = nil
+								}
+							}
 
+							continue
+					}
+				} else {
+					break
+				}
+			}
+
+			metricsBuffer[metricsBufferLength] = item.ToString()
+			metricsBufferLength++
+		}
+
+		qlength := q.Length()
+		c.lg.Println("Retry mertics queue length: ", qlength, ", metricsBufferLength: ", metricsBufferLength)
+
+		if conn == nil {
+			conn, err = c.establishConnectionToGraphite()
+			if err != nil {
 				sendAttemptCountdown++
 				continue
 			}
 
-			// We set dead line for connection to write. It should be the rest of we have for client interval
-			err = conn.SetWriteDeadline(time.Now().Add(time.Duration(c.conf.ClientSendInterval) * time.Second))
-			if err != nil {
-				c.lg.Println("Can not set deadline for retry connection: ", err.Error())
-				conn.Close()
-				conn = nil
-			}
-
-			c.mon.countGotRetry(metricsBufferLength)
-			sendAttemptCountdown = 0
-			metricsBufferLength = 0
+			c.lg.Println("Establish new connection to carbon server in retry loop")
 		}
+
+		_, err := conn.Write([]byte(strings.Join(metricsBuffer[: metricsBufferLength], "\n") + "\n"))
+		if err != nil {
+			conn.Close()
+			conn = nil
+
+			c.lg.Println("Can't send metrics in retry: ", err.Error())
+
+			sendAttemptCountdown++
+			continue
+		}
+
+		// We set dead line for connection to write. It should be the rest of we have for client interval
+		err = conn.SetWriteDeadline(time.Now().Add(time.Duration(c.conf.ClientSendInterval) * time.Second))
+		if err != nil {
+			c.lg.Println("Can not set deadline for retry connection: ", err.Error())
+			conn.Close()
+			conn = nil
+		}
+
+		c.mon.countGotRetry(metricsBufferLength)
+		sendAttemptCountdown = 0
+		metricsBufferLength = 0
 	}
 }
 
