@@ -56,7 +56,6 @@ func (c *Client) saveChannelToRetry(ch chan string, size int) {
 
 func (c *Client) metricsBufferSendToGraphite(conn net.Conn) error {
 	_, err := conn.Write([]byte(strings.Join(c.metricsBuffer[: c.metricsBufferLength], "\n") + "\n"))
-
 	if err != nil {
 		c.lg.Println("Write to server failed:", err.Error())
 		metrics := c.metricsBuffer[: c.metricsBufferLength]
@@ -144,25 +143,23 @@ func (c *Client) runClientOneStep(conn net.Conn) (bool) {
 
 	// Monitoring. We read it always and we reserved space for it
 	sendOK := c.runClientOneStepSendToGraphite(conn, c.chM, l_chMCount)
-
 	if !sendOK {
 		c.saveChannelToRetry(c.ch, l_chCount)
-		return false
+		return true
 	}
 
 	// Metrics
 	sendOK = c.runClientOneStepSendToGraphite(conn, c.ch, l_chCount)
-
 	if sendOK {
 		//Flush rest
 		if c.metricsBufferLength > 0 {
 			err := c.metricsBufferSendToGraphite(conn)
 			if err != nil {
-				return false
+				return true
 			}
-		} else {
-			return false
 		}
+
+		return false
 	}
 
 	return true
@@ -279,8 +276,8 @@ func (c *Client) runClient() {
 
 		sendFailed := c.runClientOneStep(conn)
 		if sendFailed {
-			c.lg.Println("Required reestablish connection to carbonserver")
 			if conn != nil {
+				c.lg.Println("Required reestablish connection to carbonserver")
 				conn.Close()
 				conn = nil
 			}
