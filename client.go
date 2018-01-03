@@ -1,12 +1,12 @@
 package main
 
 import (
-        "log"
-        "net"
-        "os"
-        "time"
-        "strings"
-        "github.com/beeker1121/goque"
+	"log"
+	"net"
+	"os"
+	"time"
+	"strings"
+	"github.com/beeker1121/goque"
 )
 
 const METRIBUFFERSIZE = 200
@@ -25,15 +25,15 @@ type Client struct {
 }
 
 func NewClient(conf Config, lc LocalConfig, mon *Monitoring, lg *log.Logger, ch chan string, chM chan string) *Client {
-        q, err := goque.OpenQueue(conf.RetryFile)
-        if err != nil {
-                lg.Println("Can't create retry queue:", err.Error())
-                os.Exit(1)
-        }
+	q, err := goque.OpenQueue(conf.RetryFile)
+	if err != nil {
+		lg.Println("Can't create retry queue:", err.Error())
+		os.Exit(1)
+	}
 
-        qch := make(chan *goque.Queue, 1)
+	qch := make(chan *goque.Queue, 1)
 
-        return &Client{conf, lc, mon, lg, ch, chM, q, qch, [METRIBUFFERSIZE]string{}, 0}
+	return &Client{conf, lc, mon, lg, ch, chM, q, qch, [METRIBUFFERSIZE]string{}, 0}
 }
 
 /*
@@ -41,17 +41,17 @@ func NewClient(conf Config, lc LocalConfig, mon *Monitoring, lg *log.Logger, ch 
  After every single metric
 */
 func (c *Client) saveChannelToRetry(ch chan string, size int) {
-        for i := 0; i < size; i++ {
-                metric := <-ch
+	for i := 0; i < size; i++ {
+		metric := <-ch
 
-                if c.goque.Length() < uint64(c.lc.fileMetricSize) {
-                        c.goque.EnqueueString(metric)
-                        if len(c.goquech) == 0 { c.goquech <- c.goque }
-                        c.mon.countSaved()
-                } else {
-                        c.mon.countDroped()
-                }
-        }
+		if c.goque.Length() < uint64(c.lc.fileMetricSize) {
+			c.goque.EnqueueString(metric)
+			if len(c.goquech) == 0 { c.goquech <- c.goque }
+			c.mon.countSaved()
+		} else {
+			c.mon.countDroped()
+		}
+	}
 }
 
 func (c *Client) metricsBufferSendToGraphite(conn net.Conn) error {
@@ -126,10 +126,10 @@ func (c *Client) runClientOneStepSendToGraphite(conn net.Conn, ch chan string, c
 }
 
 /*
-        Sending data to graphite:
-        1) Metrics from monitor queue
-        2) Metrics from main quere
-        3) Retry file
+Sending data to graphite:
+1) Metrics from monitor queue
+2) Metrics from main quere
+3) Retry file
 */
 func (c *Client) runClientOneStep(conn net.Conn) (bool) {
 	l_chMCount := len(c.chM)
@@ -154,11 +154,14 @@ func (c *Client) runClientOneStep(conn net.Conn) (bool) {
 	sendOK = c.runClientOneStepSendToGraphite(conn, c.ch, l_chCount)
 
 	if sendOK {
-		conn.SetWriteDeadline(time.Now().Add(time.Duration(c.conf.ClientSendInterval + c.conf.ConnectTimeout) * time.Second))
+		conn.SetWriteDeadline(time.Now().Add(time.Duration(c.conf.ClientSendInterval) * time.Second))
 
 		//Flush rest
 		if c.metricsBufferLength > 0 {
-			c.metricsBufferSendToGraphite(conn)
+			err := c.metricsBufferSendToGraphite(conn)
+			if err != nil {
+				return false
+			}
 		}
 	}
 
@@ -166,91 +169,87 @@ func (c *Client) runClientOneStep(conn net.Conn) (bool) {
 }
 
 func (c *Client) sendRetry() {
-        metricsBuffer := [METRIBUFFERSIZE]string{}
-        metricsBufferLength := int(0)
-        q := <- c.goquech
-        sendAttempts := uint(0)
+	metricsBuffer := [METRIBUFFERSIZE]string{}
+	metricsBufferLength := int(0)
+	q := <- c.goquech
 
-        var conn net.Conn
-        var err error
-        var sendAttemptCountdown uint
+	var conn net.Conn
+	var err error
+	var sendAttemptCountdown uint
 
-        for ;; {
-                qlength := q.Length()
-                c.lg.Println("Retry mertics queue length: ", qlength, ", metricsBufferLength: ", metricsBufferLength)
+	for {
+		// Если установлен обратный отсчет до следующей отправки, то доводим его до 0 и только потом пытаемся отправить снова
+		if sendAttemptCountdown > 0 {
+			sendAttemptCountdown--
+			c.lg.Println("Countdown to next send attempt ", sendAttemptCountdown)
+			time.Sleep(time.Duration(c.conf.ClientSendInterval) * time.Second)
+			continue
+		}
 
-                if metricsBufferLength == 0 {
-                        metricbufferfillloop:
-                        for ; metricsBufferLength < METRIBUFFERSIZE; {
-                                item, err := q.Dequeue()
-                                if err != nil {
-                                        select {
-                                                case <- c.goquech:
-                                                        //pass
-                                                case <- time.After((time.Duration(c.conf.ClientSendInterval) * time.Second) / 2):
-                                                        break metricbufferfillloop
-                                        }
-                                        continue
-                                }
+		if metricsBufferLength == 0 {
+			for ; metricsBufferLength < METRIBUFFERSIZE; {
+				item, err := q.Dequeue()
+				if err != nil {
+					if metricsBufferLength == 0 {
+						select {
+							case <- c.goquech:
+								continue
 
-                                metricsBuffer[metricsBufferLength] = item.ToString()
-                                metricsBufferLength++
-                        }
-                }
+							case <- time.After(time.Duration(c.conf.ClientSendInterval) * time.Second):
+								if conn != nil {
+									if metricsBufferLength == 0 {
+										c.lg.Println("Close graphite server connection in retry due unuse")
+										conn.Close()
+										conn = nil
+									}
+								}
+						}
+					} else {
+						break
+					}
+				}
 
-                // Если установлен обратный отсчет до следующей отправки, то доводим его до 0 и только потом пытаемся отправить снова
-                if sendAttemptCountdown > 0 {
-                        sendAttemptCountdown--
-                        c.lg.Println("Countdown to next send attempt ", sendAttemptCountdown)
-                        time.Sleep(time.Duration(c.conf.ClientSendInterval) * time.Second)
-                        continue
-                }
+				metricsBuffer[metricsBufferLength] = item.ToString()
+				metricsBufferLength++
+			}
 
-                //если в буфере что то есть нужно попытаться это отправить
-                if metricsBufferLength != 0 {
-                        if conn == nil {
-                                conn, err = c.establishConnectionToGraphite()
-                                if err != nil {
-                                        sendAttempts++
-                                        sendAttemptCountdown = sendAttempts
-                                        continue
-                                }
+			qlength := q.Length()
+			c.lg.Println("Retry mertics queue length: ", qlength, ", metricsBufferLength: ", metricsBufferLength)
+		} else {
+			if conn == nil {
+				conn, err = c.establishConnectionToGraphite()
+				if err != nil {
+					sendAttemptCountdown++
+					continue
+				}
 
-                                c.lg.Println("Establish new connection to graphite")
-                        }
+				c.lg.Println("Establish new connection to carbon server in retry loop")
+			}
 
-                        _, err := conn.Write([]byte(strings.Join(metricsBuffer[: metricsBufferLength], "\n") + "\n"))
-                        if err != nil {
-                                conn.Close()
-                                conn = nil
+			_, err := conn.Write([]byte(strings.Join(metricsBuffer[: metricsBufferLength], "\n") + "\n"))
+			if err != nil {
+				conn.Close()
+				conn = nil
 
-                                c.lg.Println("Can't send metrics in retry: ", err.Error())
+				c.lg.Println("Can't send metrics in retry: ", err.Error())
 
-                                sendAttempts++
-                                sendAttemptCountdown = sendAttempts
-                                continue
-                        }
+				sendAttemptCountdown++
+				continue
+			}
 
-                        // We set dead line for connection to write. It should be the rest of we have for client interval
-                        err = conn.SetWriteDeadline(time.Now().Add(time.Duration(c.conf.ClientSendInterval) * time.Second))
-                        if err != nil {
-                                c.lg.Println("Can not set deadline for retry connection: ", err.Error())
-                                conn.Close()
-                                conn = nil
-                        }
+			// We set dead line for connection to write. It should be the rest of we have for client interval
+			err = conn.SetWriteDeadline(time.Now().Add(time.Duration(c.conf.ClientSendInterval) * time.Second))
+			if err != nil {
+				c.lg.Println("Can not set deadline for retry connection: ", err.Error())
+				conn.Close()
+				conn = nil
+			}
 
-                        c.mon.countGotRetry(metricsBufferLength)
-                        sendAttempts = 0
-                        sendAttemptCountdown = 0
-                        metricsBufferLength = 0
-                } else {
-                        if conn != nil {
-                                c.lg.Println("Close graphite server connection in retry due unuse")
-                                conn.Close()
-                                conn = nil
-                        }
-                }
-        }
+			c.mon.countGotRetry(metricsBufferLength)
+			sendAttemptCountdown = 0
+			metricsBufferLength = 0
+		}
+	}
 }
 
 func (c *Client) runClient() {
@@ -262,6 +261,7 @@ func (c *Client) runClient() {
 	}
 
 	go c.sendRetry()
+
 	var conn net.Conn
 	var err error
 	conn = nil
