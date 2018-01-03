@@ -48,8 +48,10 @@ func NewMonitoring(conf Config, lg *log.Logger, chM chan string) *Monitoring {
 }
 
 func (m *Monitoring) generateOwnMonitoring() []string {
+	l_unixtime := time.Now().Unix()
+	l_unixtime = l_unixtime - l_unixtime % int64(m.conf.MetricsCollectInterval)
 
-	now := strconv.FormatInt(time.Now().Unix(),10)
+	now := strconv.FormatInt(l_unixtime, 10)
 	hostname,_ := os.Hostname()
 	path := strings.Replace(m.conf.MonitoringPath, "HOSTNAME", strings.Replace(hostname, ".", "_", -1), -1) + ".grafsy."
 
