@@ -58,6 +58,7 @@ func (c *Client) metricsBufferSendToGraphite(conn net.Conn) error {
 	_, err := conn.Write([]byte(strings.Join(c.metricsBuffer[: c.metricsBufferLength], "\n") + "\n"))
 
 	if err != nil {
+		c.lg.Println("Write to server failed:", err.Error())
 		metrics := c.metricsBuffer[: c.metricsBufferLength]
 
 		for _, metric := range metrics {
@@ -81,7 +82,6 @@ func (c *Client) tryToSendToGraphite(metric string, conn net.Conn) error {
 		err := c.metricsBufferSendToGraphite(conn)
 
 		if err != nil {
-			c.lg.Println("Write to server failed:", err.Error())
 			return err
 		}
 
@@ -160,6 +160,8 @@ func (c *Client) runClientOneStep(conn net.Conn) (bool) {
 			if err != nil {
 				return false
 			}
+		} else {
+			return false
 		}
 	}
 
@@ -278,8 +280,10 @@ func (c *Client) runClient() {
 		sendFailed := c.runClientOneStep(conn)
 		if sendFailed {
 			c.lg.Println("Required reestablish connection to carbonserver")
-			conn.Close()
-			conn = nil
+			if conn != nil {
+				conn.Close()
+				conn = nil
+			}
 		}
 	}
 }

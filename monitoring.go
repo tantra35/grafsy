@@ -31,7 +31,7 @@ type Monitoring struct {
 	ch chan pair
 }
 
-const monitorMetrics  = 7
+const monitorMetrics  = 10
 const (
 	DROP = 0
 	SENT = 1
